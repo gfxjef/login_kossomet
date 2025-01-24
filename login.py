@@ -22,66 +22,59 @@ CORS(app, resources={
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuración de la base de datos desde variables de entorno
+# Configuración original de la base de datos (sin cambios)
 DB_CONFIG = {
     'user': os.getenv('DB_USER'),
     'password': os.getenv('DB_PASSWORD'),
     'host': os.getenv('DB_HOST'),
     'database': os.getenv('DB_NAME'),
-    'port': int(os.getenv('DB_PORT', 3306)),
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci'
+    'port': int(os.getenv('DB_PORT', 3306))
 }
 
 def get_db_connection():
-    """Establece y retorna una conexión segura a la base de datos"""
+    """Establece y retorna conexión a la base de datos"""
     try:
-        conn = mysql.connector.connect(
-            **DB_CONFIG,
-            ssl_disabled=False,  # Habilitar SSL si está disponible
-            connection_timeout=10
-        )
-        logger.info("Conexión a DB establecida exitosamente")
+        conn = mysql.connector.connect(**DB_CONFIG)
+        logger.info("Conexión a DB exitosa")
         return conn
     except mysql.connector.Error as err:
-        logger.error(f"Error de conexión a DB: {err}")
+        logger.error(f"Error de conexión: {err}")
         return None
 
 @app.route('/login', methods=['POST'])
 def handle_login():
-    """Endpoint para autenticación de usuarios"""
-    # Validación básica de entrada
+    # Validación de campos ORIGINALES
     if not request.is_json:
-        return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        return jsonify({'success': False, 'message': 'Se requiere JSON'}), 400
     
     data = request.get_json()
     
-    required_fields = ['usuario', 'password']
-    if not all(field in data for field in required_fields):
-        return jsonify({'success': False, 'message': 'Faltan campos requeridos'}), 400
+    if 'usuario' not in data or 'pass' not in data:
+        return jsonify({'success': False, 'message': 'Faltan usuario o pass'}), 400
 
-    usuario = data['usuario'].strip().lower()
-    password = data['password'].encode('utf-8')
+    usuario = data['usuario'].strip()
+    pass_input = data['pass'].encode('utf-8')  # Campo se llama 'pass'
 
     conn = get_db_connection()
     if not conn:
-        return jsonify({'success': False, 'message': 'Error de conexión con el servidor'}), 500
+        return jsonify({'success': False, 'message': 'Error de conexión a BD'}), 500
 
     try:
-        with conn.cursor(dictionary=True) as cursor:
-            cursor.execute(
-                "SELECT id, usuario, nombre, cargo, password_hash FROM usuarios WHERE usuario = %s",
-                (usuario,)
-            )
-            user = cursor.fetchone()
+        cursor = conn.cursor(dictionary=True)
+        # Consulta ORIGINAL (columna pass)
+        cursor.execute(
+            "SELECT id, usuario, nombre, cargo, pass FROM usuarios WHERE usuario = %s",
+            (usuario,)
+        )
+        user = cursor.fetchone()
 
         if not user:
-            logger.warning(f"Intento de login fallido para usuario: {usuario}")
+            logger.warning(f"Intento fallido: Usuario {usuario} no existe")
             return jsonify({'success': False, 'message': 'Credenciales inválidas'}), 401
 
-        # Verificar contraseña con bcrypt
-        if bcrypt.checkpw(password, user['password_hash'].encode('utf-8')):
-            logger.info(f"Login exitoso para usuario: {usuario}")
+        # Verificar contraseña con bcrypt (columna pass)
+        if bcrypt.checkpw(pass_input, user['pass'].encode('utf-8')):
+            logger.info(f"Login exitoso: {usuario}")
             return jsonify({
                 'success': True,
                 'user': {
@@ -92,15 +85,16 @@ def handle_login():
                 }
             })
         else:
-            logger.warning(f"Contraseña incorrecta para usuario: {usuario}")
+            logger.warning(f"Pass incorrecta para: {usuario}")
             return jsonify({'success': False, 'message': 'Credenciales inválidas'}), 401
 
     except mysql.connector.Error as err:
-        logger.error(f"Error de base de datos: {err}")
-        return jsonify({'success': False, 'message': 'Error interno del servidor'}), 500
+        logger.error(f"Error BD: {err}")
+        return jsonify({'success': False, 'message': 'Error interno'}), 500
 
     finally:
         if conn.is_connected():
+            cursor.close()
             conn.close()
 
 if __name__ == '__main__':
