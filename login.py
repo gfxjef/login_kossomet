@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector
 import os
-import bcrypt
 import logging
 from dotenv import load_dotenv
 
@@ -22,20 +21,20 @@ CORS(app, resources={
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuración original de la base de datos (sin cambios)
+# Configuración de la base de datos
 DB_CONFIG = {
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'host': os.getenv('DB_HOST'),
-    'database': os.getenv('DB_NAME'),
+    'user': os.getenv('DB_USER', 'atusalud_atusalud'),
+    'password': os.getenv('DB_PASSWORD', 'kmachin1'),
+    'host': os.getenv('DB_HOST', 'atusaludlicoreria.com'),
+    'database': os.getenv('DB_NAME', 'atusalud_kossomet'),
     'port': int(os.getenv('DB_PORT', 3306))
 }
 
 def get_db_connection():
-    """Establece y retorna conexión a la base de datos"""
+    """Establece conexión a la base de datos"""
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
-        logger.info("Conexión a DB exitosa")
+        logger.info("Conexión exitosa a la BD")
         return conn
     except mysql.connector.Error as err:
         logger.error(f"Error de conexión: {err}")
@@ -43,37 +42,33 @@ def get_db_connection():
 
 @app.route('/login', methods=['POST'])
 def handle_login():
-    # Validación de campos ORIGINALES
+    # Validar campos requeridos
     if not request.is_json:
         return jsonify({'success': False, 'message': 'Se requiere JSON'}), 400
     
     data = request.get_json()
     
     if 'usuario' not in data or 'pass' not in data:
-        return jsonify({'success': False, 'message': 'Faltan usuario o pass'}), 400
+        return jsonify({'success': False, 'message': 'Faltan usuario o contraseña'}), 400
 
     usuario = data['usuario'].strip()
-    pass_input = data['pass'].encode('utf-8')  # Campo se llama 'pass'
+    password = data['pass']  # Contraseña en texto plano
 
     conn = get_db_connection()
     if not conn:
-        return jsonify({'success': False, 'message': 'Error de conexión a BD'}), 500
+        return jsonify({'success': False, 'message': 'Error de conexión con el servidor'}), 500
 
     try:
         cursor = conn.cursor(dictionary=True)
-        # Consulta ORIGINAL (columna pass)
+        
+        # Consulta ORIGINAL (comparación directa de contraseña en texto plano)
         cursor.execute(
-            "SELECT id, usuario, nombre, cargo, pass FROM usuarios WHERE usuario = %s",
-            (usuario,)
+            "SELECT id, usuario, nombre, cargo FROM usuarios WHERE usuario = %s AND pass = %s",
+            (usuario, password)
         )
         user = cursor.fetchone()
 
-        if not user:
-            logger.warning(f"Intento fallido: Usuario {usuario} no existe")
-            return jsonify({'success': False, 'message': 'Credenciales inválidas'}), 401
-
-        # Verificar contraseña con bcrypt (columna pass)
-        if bcrypt.checkpw(pass_input, user['pass'].encode('utf-8')):
+        if user:
             logger.info(f"Login exitoso: {usuario}")
             return jsonify({
                 'success': True,
@@ -85,13 +80,13 @@ def handle_login():
                 }
             })
         else:
-            logger.warning(f"Pass incorrecta para: {usuario}")
+            logger.warning(f"Intento fallido: {usuario}")
             return jsonify({'success': False, 'message': 'Credenciales inválidas'}), 401
 
     except mysql.connector.Error as err:
-        logger.error(f"Error BD: {err}")
-        return jsonify({'success': False, 'message': 'Error interno'}), 500
-
+        logger.error(f"Error de BD: {err}")
+        return jsonify({'success': False, 'message': 'Error interno del servidor'}), 500
+        
     finally:
         if conn.is_connected():
             cursor.close()
